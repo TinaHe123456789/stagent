@@ -1,6 +1,6 @@
 # 守卫：PreToolUse 拦截与危险命令规则（M2-1）
 
-对应规格 §6「守卫·写时拦截」与 tasks.md 的 M2-1。不含合并闸门（M2-3）与 Claude Code 适配器（M3）。
+对应规格 §6「守卫·写时拦截」与 tasks.md 的 M2-1。合并门见 [auth.md](auth.md)（M2-3）；不含 Claude Code 适配器（M3）。
 
 ## 做了什么
 
@@ -92,7 +92,7 @@
 - 只在 `.git/hooks/` 存在时安装；脚本带 `# stagent pre-merge-commit reminder` 标记，重复 init 幂等。
 - 已有不带标记的同名钩子 → 跳过并警告，不覆盖。
 - 关闭：`.stagent/config.json` 设 `"guard": { "preMergeReminder": false }` 后重新运行 `stagent init`，会删除自己装的脚本。
-- 环境变量 `STAGENT_MERGE` 非空时不提醒：M2-3 的合并闸门执行 `git merge` 时应设置它。
+- 环境变量 `STAGENT_MERGE` 非空时不提醒：M2-3 的合并门提交时会设置它。
 - `git merge --ff-only` 等不产生合并提交的情况 git 不会调用这个钩子。
 
 ## 假设与局限

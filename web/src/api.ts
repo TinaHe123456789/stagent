@@ -9,6 +9,11 @@ export type { ChangePhase, ChangeView, ChangesProjection } from '../../src/chang
 export type OverviewResponse = Overview & {
   runError: string | null;
   project: { name: string; branch: string | null };
+  auth: {
+    dangling: { authId: string; action: string; changeId?: string; at: string; reason: string }[];
+    tamperedChecks: { exampleId: string; featureId: string; featureName: string; checkPath: string; problem: string }[];
+    releaseConfigured: boolean;
+  };
 };
 
 export class ApiError extends Error {
@@ -47,7 +52,27 @@ export const api = {
     request<{ exampleId: string; featureId: string }>('POST', `/api/changes/${encodeURIComponent(changeId)}/examples`, body),
   lockExamples: (changeId: string) => request<ChangeView>('POST', `/api/changes/${encodeURIComponent(changeId)}/examples/lock`, {}),
   startCheck: (changeId: string) => request<{ total: number }>('POST', `/api/changes/${encodeURIComponent(changeId)}/check`),
+  merge: (changeId: string) => request<AuthResult>('POST', `/api/changes/${encodeURIComponent(changeId)}/merge`),
+  authorize: (body: { action: string; reason: string } & Record<string, unknown>) => request<AuthResult>('POST', '/api/auth', body),
+  abandonPreview: (changeId: string) =>
+    request<{ restoreTo: string; files: { path: string; status: string }[]; note: string }>(
+      'GET',
+      `/api/changes/${encodeURIComponent(changeId)}/abandon-preview`,
+    ),
+  dismissDangling: (authId: string) => request<{ ok: true }>('POST', `/api/auth/${encodeURIComponent(authId)}/dismiss`),
+  restoreExample: (exampleId: string) => request<{ ok: true }>('POST', `/api/examples/${encodeURIComponent(exampleId)}/restore`),
+  relockExample: (exampleId: string, body: Record<string, string> = {}) =>
+    request<{ ok: true }>('POST', `/api/examples/${encodeURIComponent(exampleId)}/relock`, body),
 };
+
+export interface AuthResult {
+  authId: string;
+  action: string;
+  ok: boolean;
+  detail?: string;
+  mergeCommit?: string;
+  exitCode?: number;
+}
 
 /** 订阅服务端事件；任何事件都触发 onChange。EventSource 自带 Last-Event-ID 续传。 */
 export function subscribe(onChange: (type: string) => void): () => void {

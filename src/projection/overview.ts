@@ -32,7 +32,11 @@ export type ActionId =
   | 'start_check'
   | 'fix'
   | 'merge_override'
-  | 'confirm_visual';
+  | 'confirm_visual'
+  | 'abandon'
+  | 'restore_locked'
+  | 'modify_locked'
+  | 'release';
 
 export interface CardAction {
   id: ActionId;
@@ -89,14 +93,43 @@ const SEVERITY: Record<'failed' | UnverifiedReason | 'no_examples' | 'weak', num
   weak: 9,
 };
 
+/** 授权相关的状态（由服务计算）。 */
+export interface AuthSummary {
+  /** 已消费、未结算的授权（崩溃留下，不自动重试）。 */
+  dangling: { authId: string; action: string; changeId?: string; at: string }[];
+  /** 工作区或快照与锁定时不一致的锁定检查（合并门会拒绝）。 */
+  tamperedChecks: { exampleId: string; featureName: string; checkPath: string; problem: string }[];
+  releaseConfigured: boolean;
+}
+
 export interface OverviewInput {
   projection: LedgerProjection;
   ledger: { state: 'ok' | 'locked'; brokenLinks: BrokenLink[] };
   run: RunProgressView | null;
   change?: ChangeView | null;
+  auth?: AuthSummary;
 }
 
-export function buildOverview({ projection, ledger, run, change = null }: OverviewInput): Overview {
+const DANGLING_LABELS: Record<string, string> = {
+  merge: '合并',
+  merge_override: '强行合并',
+  abandon: '放弃改动',
+  modify_locked: '修改锁定例子',
+  delete: '退役功能',
+  release: '发布上线',
+  budget_raise: '提高费用上限',
+};
+
+export function buildOverview(input: OverviewInput): Overview {
+  const base = buildCard(input);
+  const dangling = input.auth?.dangling ?? [];
+  if (dangling.length === 0) return base;
+  // 悬挂授权放在最前：它说明上次有个不可逆动作做到一半，系统不会自己重试。
+  const text = `有 ${dangling.length} 个授权已消费但没有完成（${dangling.map((d) => DANGLING_LABELS[d.action] ?? d.action).join('、')}），可能是中途崩溃，系统不会自动重试，请确认后处理`;
+  return { ...base, reasons: [{ severity: 0, text, featureIds: [] }, ...base.reasons].slice(0, 3) };
+}
+
+function buildCard({ projection, ledger, run, change = null, auth }: OverviewInput): Overview {
   const features = projection.features;
   const examples = features.flatMap((f) => f.examples);
   const stats = {
@@ -126,10 +159,12 @@ export function buildOverview({ projection, ledger, run, change = null }: Overvi
       ? '当前没有进行中的改动'
       : mergeCounts
         ? `还有 ${mergeCounts}`
-        : change.phase === 'mergeable'
-          ? '合并门在 M2-3 提供'
-          : `改动处于「${change.phaseLabel}」阶段`,
+        : `改动处于「${change.phaseLabel}」阶段`,
   };
+  if (change?.phase === 'mergeable' && !mergeCounts) {
+    merge.enabled = true;
+    delete merge.disabledReason;
+  }
   const runAction = (primary: boolean): CardAction =>
     examples.length > 0
       ? { id: 'run_regression', label: '运行全量回归', enabled: true, primary }
@@ -172,6 +207,29 @@ export function buildOverview({ projection, ledger, run, change = null }: Overvi
     };
   }
 
+  const tampered = auth?.tamperedChecks ?? [];
+  if (tampered.length) {
+    return {
+      ...common,
+      status: 'blocked',
+      ...CARD_STATUS_LABELS.blocked,
+      canContinue: false,
+      reasons: [
+        {
+          severity: 0,
+          text: `锁定检查被修改：${tampered.map((t) => `「${t.featureName}」${t.checkPath}`).join('、')}（Cursor 或手写的改动只在合并前校验）`,
+          featureIds: [],
+        },
+        ...reasons,
+      ].slice(0, 3),
+      actions: [
+        { id: 'restore_locked', label: '还原锁定文件', enabled: true, primary: true },
+        { id: 'modify_locked', label: '授权修改锁定例子', enabled: true },
+        { ...merge, enabled: false, disabledReason: '锁定检查被修改' },
+      ],
+    };
+  }
+
   if (change) return changeCard(change, { common, reasons, merge, runAction });
 
   if (features.length === 0) {
@@ -207,8 +265,16 @@ export function buildOverview({ projection, ledger, run, change = null }: Overvi
     ...CARD_STATUS_LABELS.ok,
     canContinue: true,
     reasons,
-    actions: [newChange(true), runAction(false), merge],
+    actions: [newChange(true), runAction(false), ...(auth?.releaseConfigured ? [releaseAction()] : []), merge],
   };
+}
+
+function releaseAction(): CardAction {
+  return { id: 'release', label: '发布上线（需授权）', enabled: true };
+}
+
+function abandonAction(): CardAction {
+  return { id: 'abandon', label: '放弃改动（需授权）', enabled: true };
 }
 
 function newChange(primary: boolean): CardAction {
@@ -242,6 +308,7 @@ function changeCard(
           change.pendingDraftIds.length > 0
             ? { id: 'lock_examples', label: `确认并锁定 ${change.pendingDraftIds.length} 个例子`, enabled: true, primary: true }
             : { id: 'lock_examples', label: '确认并锁定例子', enabled: false, disabledReason: '先起草至少一个例子', primary: true },
+          abandonAction(),
           merge,
         ],
       };
@@ -252,7 +319,7 @@ function changeCard(
         ...CARD_STATUS_LABELS.blocked,
         canContinue: false,
         reasons: top3(head.length ? head : [{ severity: 1, text: `改动${name}实现中`, featureIds: [] }]),
-        actions: [{ id: 'start_check', label: '开始检查（全量回归）', enabled: true, primary: true }, merge],
+        actions: [{ id: 'start_check', label: '开始检查（全量回归）', enabled: true, primary: true }, abandonAction(), merge],
       };
     case 'blocked':
       return {
@@ -263,8 +330,9 @@ function changeCard(
         reasons: top3(head),
         actions: [
           { id: 'fix', label: '交给 Claude Code 修复', enabled: false, disabledReason: 'Claude Code 驱动在 M3 提供；你自己修改后会回到「实现中」' },
-          { id: 'merge_override', label: '授权强行合并', enabled: false, disabledReason: '授权在 M2-3 提供' },
+          { id: 'merge_override', label: '授权强行合并', enabled: true },
           ctx.runAction(false),
+          abandonAction(),
           merge,
         ],
       };
@@ -275,7 +343,12 @@ function changeCard(
         ...CARD_STATUS_LABELS.needs_you,
         canContinue: false,
         reasons: top3(head),
-        actions: [{ id: 'confirm_visual', label: '确认外观', enabled: false, disabledReason: '截图确认在 M4-2 提供', primary: true }, merge],
+        actions: [
+          { id: 'confirm_visual', label: '确认外观', enabled: false, disabledReason: '截图确认在 M4-2 提供', primary: true },
+          { id: 'merge_override', label: '授权强行合并', enabled: true },
+          abandonAction(),
+          merge,
+        ],
       };
     default:
       // mergeable（终止阶段不会作为进行中的改动传进来）
@@ -285,7 +358,7 @@ function changeCard(
         ...CARD_STATUS_LABELS.ok,
         canContinue: true,
         reasons: top3([{ severity: 5, text: `改动${name}全部检查通过，可以合并`, featureIds: [] }]),
-        actions: [{ ...merge, primary: true }, ctx.runAction(false)],
+        actions: [{ ...merge, primary: true }, ctx.runAction(false), abandonAction()],
       };
   }
 }

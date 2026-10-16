@@ -90,6 +90,8 @@ export interface FeatureView {
   examples: ExampleView[];
   /** 起草但尚未锁定的例子数。 */
   draftCount: number;
+  /** 经「授权修改锁定例子」解锁、等待改完重新锁定的例子。 */
+  unlockedForEdit: { exampleId: string; then: string; checkPath: string; reason: string; at: IsoTime }[];
   lockedCount: number;
   verifiedCount: number;
   coverage: { weak: boolean; reason?: string };
@@ -122,6 +124,8 @@ export function project(lines: readonly LedgerLine[], current: CurrentWorkTree):
   const locked = new Map<string, LockedExample>();
   const results = new Map<string, StoredResult>(); // `${exampleId}\0${snapshotId}` → 最近结果
   const claims = new Map<string, { text: string; at: IsoTime }[]>();
+  const authActions = new Map<string, string>();
+  const unlocked = new Map<string, { reason: string; at: IsoTime; authId?: string }>();
   let lastGuardBlock: LedgerProjection['lastGuardBlock'] = null;
   let lastRun: LedgerProjection['lastRun'] = null;
 
@@ -140,9 +144,14 @@ export function project(lines: readonly LedgerLine[], current: CurrentWorkTree):
         break;
       case 'example.locked':
         locked.set(e.exampleId, { checkPath: e.checkPath, checkHash: e.checkHash, at });
+        unlocked.delete(e.exampleId);
         break;
       case 'example.unlocked':
         locked.delete(e.exampleId);
+        unlocked.set(e.exampleId, { reason: e.reason, at, ...(e.authId ? { authId: e.authId } : {}) });
+        break;
+      case 'auth.granted':
+        authActions.set(e.authId, e.action);
         break;
       case 'claim.reported':
         if (e.exampleId) {
@@ -187,15 +196,24 @@ export function project(lines: readonly LedgerLine[], current: CurrentWorkTree):
   }
 
   const draftCounts = new Map<string, number>();
+  const relock = new Map<string, FeatureView['unlockedForEdit']>();
   for (const d of drafts.values()) {
-    if (!locked.has(d.exampleId)) draftCounts.set(d.featureId, (draftCounts.get(d.featureId) ?? 0) + 1);
+    if (locked.has(d.exampleId)) continue;
+    const u = unlocked.get(d.exampleId);
+    if (u?.authId && authActions.get(u.authId) === 'modify_locked') {
+      const list = relock.get(d.featureId) ?? [];
+      list.push({ exampleId: d.exampleId, then: d.then, checkPath: d.checkPath ?? '', reason: u.reason, at: u.at });
+      relock.set(d.featureId, list);
+    } else if (!u) {
+      draftCounts.set(d.featureId, (draftCounts.get(d.featureId) ?? 0) + 1);
+    }
   }
 
   const featureViews: FeatureView[] = [];
   for (const [featureId, f] of features) {
     if (f.retired) continue;
     const examples = (examplesByFeature.get(featureId) ?? []).sort((a, b) => a.lockedAt.localeCompare(b.lockedAt));
-    featureViews.push(judgeFeature(f.e, f.at, examples, draftCounts.get(featureId) ?? 0));
+    featureViews.push({ ...judgeFeature(f.e, f.at, examples, draftCounts.get(featureId) ?? 0), unlockedForEdit: relock.get(featureId) ?? [] });
   }
   featureViews.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
@@ -301,7 +319,7 @@ function judgeFeature(
   createdAt: IsoTime,
   examples: ExampleView[],
   draftCount: number,
-): FeatureView {
+): Omit<FeatureView, 'unlockedForEdit'> {
   const lockedCount = examples.length;
   const verifiedCount = examples.filter((x) => x.state === 'verified').length;
   const failedCount = examples.filter((x) => x.state === 'failed').length;

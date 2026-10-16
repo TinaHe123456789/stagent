@@ -33,8 +33,7 @@ describe('改动接口', () => {
     expect(o.status).toBe('ok');
     expect(o.change?.changeId).toBe(first.changeId);
     const merge = o.actions.find((a) => a.id === 'merge')!;
-    expect(merge).toMatchObject({ enabled: false });
-    expect(merge.disabledReason).toBeTruthy();
+    expect(merge).toMatchObject({ enabled: true, primary: true });
   });
 
   it('同一时间只能有一个进行中的改动：并发创建只有一个成功，其余 409（#14）', async () => {

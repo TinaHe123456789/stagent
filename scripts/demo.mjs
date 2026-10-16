@@ -56,7 +56,7 @@ for (const [path, content] of Object.entries(files)) {
 const git = (...args) => execFileSync('git', ['-c', 'user.name=demo', '-c', 'user.email=demo@stagent.local', ...args], { cwd: root });
 git('init', '-q', '-b', 'main');
 await initProject(root);
-await writeFile(join(root, '.stagent/config.json'), JSON.stringify({ checkCommand: 'node {path}', checkTimeoutMs: 10000 }, null, 2));
+await writeFile(join(root, '.stagent/config.json'), JSON.stringify({ checkCommand: 'node {path}', checkTimeoutMs: 10000, releaseCommand: 'echo 已发布 > released.txt' }, null, 2));
 git('add', '-A');
 git('commit', '-q', '-m', 'demo');
 

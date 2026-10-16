@@ -79,6 +79,23 @@ export async function buildServer(service: StagentService, opts: BuildServerOpti
     reply.status(202).send(await service.startCheck(req.params.id)),
   );
 
+  // 授权与合并门（§6）：所有不可逆动作都走授权三段式。
+  app.post<{ Params: { id: string } }>('/api/changes/:id/merge', (req) => service.merge(req.params.id));
+  app.get<{ Params: { id: string } }>('/api/changes/:id/abandon-preview', (req) => service.abandonPreview(req.params.id));
+  app.post<{ Body: Record<string, unknown> }>('/api/auth', (req) => service.authorize(req.body ?? {}));
+  app.post<{ Params: { authId: string } }>('/api/auth/:authId/dismiss', async (req) => {
+    await service.dismissDangling(req.params.authId);
+    return { ok: true };
+  });
+  app.post<{ Params: { id: string } }>('/api/examples/:id/restore', async (req) => {
+    await service.restoreLockedCheck(req.params.id);
+    return { ok: true };
+  });
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>('/api/examples/:id/relock', async (req) => {
+    await service.relockExample(req.params.id, req.body ?? {});
+    return { ok: true };
+  });
+
   app.get<{ Querystring: { lastEventId?: string } }>('/api/events/stream', (req, reply) => {
     const header = req.headers['last-event-id'];
     const lastId = Number((Array.isArray(header) ? header[0] : header) ?? req.query.lastEventId ?? NaN);

@@ -724,3 +724,94 @@ select {
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
 }
+
+/* ---- 授权 ---- */
+.btn-danger {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fff;
+}
+.btn-danger:hover:not(:disabled) {
+  background: #991b1b;
+}
+.btn-ghost-danger {
+  border-color: #fecaca;
+  background: transparent;
+  color: var(--bad);
+}
+.auth-block {
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
+.auth-block ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.auth-block li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dialog {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, 92vw);
+  background: var(--surface);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 10;
+}
+.dialog-title {
+  margin: 0;
+  font-size: 18px;
+}
+.dialog-background {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.dialog-files ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  align-items: center;
+}
+textarea {
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  resize: vertical;
+}
+.dangling ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.example-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.drawer-footer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
