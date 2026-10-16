@@ -11,13 +11,16 @@ interface Props {
   onDraft: (body: Record<string, string>) => Promise<void>;
   onLock: () => Promise<void>;
   onCheck: () => Promise<void>;
+  onMerge: () => void;
+  onOverride: () => void;
+  onAbandon: () => void;
 }
 
 const SOURCE_LABEL: Record<ChangeView['source'], string> = { 'claude-code': 'Stagent 发起', external: '外部改动（Cursor / 手写）' };
 const NEW_FEATURE = '__new__';
 
 /** 进行中的改动：档位、流程进度、原因，以及当前阶段需要你做的事。 */
-export function ChangePanel({ change, features, disabled, onSetTrack, onDraft, onLock, onCheck }: Props) {
+export function ChangePanel({ change, features, disabled, onSetTrack, onDraft, onLock, onCheck, onMerge, onOverride, onAbandon }: Props) {
   const [form, setForm] = useState({ featureId: NEW_FEATURE, featureName: '', given: '', when: '', then: '', kind: 'behavior', checkPath: '.stagent/checks/' });
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
   const isFeature = change.track === 'feature';
@@ -99,6 +102,8 @@ export function ChangePanel({ change, features, disabled, onSetTrack, onDraft, o
         </p>
       )}
 
+      <AuthBlock change={change} disabled={disabled} onMerge={onMerge} onOverride={onOverride} onAbandon={onAbandon} />
+
       {isFeature && (
         <div className="drafts">
           <h3 className="section-title">验收例子草稿</h3>
@@ -177,5 +182,73 @@ export function ChangePanel({ change, features, disabled, onSetTrack, onDraft, o
         </div>
       )}
     </section>
+  );
+}
+
+/** 授权区块：合并、强行合并、放弃——每项写明现在能不能做、为什么、怎么解除。 */
+function AuthBlock({
+  change,
+  disabled,
+  onMerge,
+  onOverride,
+  onAbandon,
+}: {
+  change: ChangeView;
+  disabled: boolean;
+  onMerge: () => void;
+  onOverride: () => void;
+  onAbandon: () => void;
+}) {
+  const inExamples = change.phase === 'confirm_examples' || change.phase === 'red_check';
+  const checking = change.phase === 'checking';
+  const rows: { label: string; enabled: boolean; why: string; onClick: () => void; danger?: boolean }[] = [
+    {
+      label: '合并',
+      enabled: change.phase === 'mergeable',
+      why:
+        change.phase === 'mergeable'
+          ? '全部检查通过。合并前服务端会再校验锁定检查与账本'
+          : `需要全部检查通过；现在是「${change.phaseLabel}」${change.blockers[0] ? `：${change.blockers[0]}` : ''}`,
+      onClick: onMerge,
+    },
+    {
+      label: '授权强行合并',
+      enabled: !inExamples && !checking && change.phase !== 'mergeable',
+      why: inExamples
+        ? '还在确认例子阶段'
+        : checking
+          ? '检查进行中'
+          : change.phase === 'mergeable'
+            ? '已经可以正常合并'
+            : '有失败或未验证的例子时可用；需要填写原因，会进入交付报告',
+      onClick: onOverride,
+      danger: true,
+    },
+    {
+      label: '放弃改动',
+      enabled: !checking,
+      why: checking ? '检查进行中' : '还原到改动开始时的提交，需要填写原因；先列出受影响的文件',
+      onClick: onAbandon,
+      danger: true,
+    },
+  ];
+  return (
+    <div className="auth-block">
+      <h3 className="section-title">授权</h3>
+      <ul>
+        {rows.map((r) => (
+          <li key={r.label}>
+            <button
+              className={r.label === '合并' && r.enabled ? 'btn btn-primary' : r.danger ? 'btn btn-ghost-danger' : 'btn'}
+              disabled={disabled || !r.enabled}
+              onClick={r.onClick}
+            >
+              {r.label}
+            </button>
+            <span className="disabled-reason">{r.why}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

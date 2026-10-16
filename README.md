@@ -20,6 +20,8 @@ npm run build   # 编译到 dist/
 - [x] M1-3 状态投影、本地服务、init 与首页结论卡 —— 见 [docs/service.md](docs/service.md)
 - [x] M2-1 守卫：PreToolUse 拦截与危险命令规则 —— 见 [docs/guard.md](docs/guard.md)
 - [x] M2-2 改动流程：两档、互斥、外部改动识别与状态机 —— 见 [docs/changes.md](docs/changes.md)
+- [x] M2-3 授权三段式事务与服务端合并门 —— 见 [docs/auth.md](docs/auth.md)
+- [ ] ★ MVP 试用检查点（tasks.md 第 4 节，不写代码）
 
 ## CLI
 

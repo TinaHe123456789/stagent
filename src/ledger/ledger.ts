@@ -3,7 +3,7 @@
  *
  * - 打开时校验整条链；每次写入前在写锁内重新读盘校验（规格："服务启动时和每次写入前都会校验整条链"）。
  * - 链断裂 → 只读锁定，写入抛 LedgerLockedError；只有 acceptCurrentState() 能写 ledger.integrity_override 解除。
- * - 写锁是进程内互斥锁，transaction() 让 M2-3 的授权三段式在同一把锁内连续追加；事务内调用 append() 可重入。
+ * - 写锁是进程内互斥锁，transaction() 让授权三段式（src/server/auth.ts）的每一段在同一把锁内连续追加；事务内调用 append() 可重入。
  *
  * 不在本模块：~/.stagent 链头锚点、head.tmp、TOFU、从 git 恢复（M6-1）。
  */

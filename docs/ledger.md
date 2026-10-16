@@ -39,7 +39,7 @@
 
 ## 写锁与事务
 
-`Ledger#transaction(fn)` 在同一把进程内互斥锁里执行 `fn`，`fn` 内的追加依次落盘、不被其它写入插队；事务内直接调用 `ledger.append()` 可重入。供 M2-3 的授权三段式（`auth.consumed` → 副作用 → 结果事件 + `auth.settled`）使用。
+`Ledger#transaction(fn)` 在同一把进程内互斥锁里执行 `fn`，`fn` 内的追加依次落盘、不被其它写入插队；事务内直接调用 `ledger.append()` 可重入。M2-3 的授权三段式（`auth.consumed` → 副作用 → 结果事件 + `auth.settled`）用它把每一段的事件原子地写入，见 [auth.md](auth.md)。
 
 ## 推断与待规格确认
 

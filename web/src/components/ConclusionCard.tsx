@@ -3,12 +3,9 @@ import type { CardAction, OverviewResponse } from '../api';
 
 interface Props {
   overview: OverviewResponse;
-  onRun: () => void;
-  onCancel: () => void;
+  /** 各按钮的处理函数（结论卡只负责展示与禁用原因）。 */
+  handlers: Partial<Record<CardAction['id'], () => void>>;
   onAcceptLedger: (reason: string) => void;
-  onNewChange: (track: 'small' | 'feature') => void;
-  onLockExamples: () => void;
-  onStartCheck: () => void;
 }
 
 const VERDICT: Record<OverviewResponse['status'], string> = {
@@ -20,17 +17,9 @@ const VERDICT: Record<OverviewResponse['status'], string> = {
   empty: '先描述第一个功能并锁定它的验收例子',
 };
 
-export function ConclusionCard({ overview, onRun, onCancel, onAcceptLedger, onNewChange, onLockExamples, onStartCheck }: Props) {
+export function ConclusionCard({ overview, handlers: given, onAcceptLedger }: Props) {
   const [reason, setReason] = useState('');
-  const handlers: Partial<Record<CardAction['id'], () => void>> = {
-    run_regression: onRun,
-    cancel_run: onCancel,
-    add_feature: () => onNewChange('feature'),
-    new_change: () => onNewChange('small'),
-    lock_examples: onLockExamples,
-    start_check: onStartCheck,
-    accept_ledger: () => onAcceptLedger(reason),
-  };
+  const handlers: Partial<Record<CardAction['id'], () => void>> = { ...given, accept_ledger: () => onAcceptLedger(reason) };
 
   return (
     <section className={`card conclusion status-${overview.status}`} aria-label="结论卡">

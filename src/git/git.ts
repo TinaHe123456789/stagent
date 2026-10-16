@@ -14,9 +14,9 @@ export class GitError extends Error {
   override name = 'GitError';
 }
 
-export async function git(cwd: string, args: string[]): Promise<string> {
+export async function git(cwd: string, args: string[], opts: { env?: NodeJS.ProcessEnv } = {}): Promise<string> {
   try {
-    const { stdout } = await run('git', args, { cwd, maxBuffer: 256 * 1024 * 1024, encoding: 'utf8' });
+    const { stdout } = await run('git', args, { cwd, maxBuffer: 256 * 1024 * 1024, encoding: 'utf8', ...(opts.env ? { env: opts.env } : {}) });
     return stdout;
   } catch (err) {
     const e = err as NodeJS.ErrnoException & { stderr?: string };

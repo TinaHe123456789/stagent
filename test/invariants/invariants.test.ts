@@ -2,7 +2,8 @@
  * 核心不变量回归测试（tasks.md：从 M1-3 起，每个任务的 PR 都必须让这组测试保持通过）。
  *
  * 已建立：Invariant 2（无 API 可直接写已验证）、Invariant 3（已验证可追溯到有效 run）、
- * Invariant 4（改锁定检查后旧 run 不再作证，投影部分）。Invariant 1（claim 不能产生已验证）的投影部分也在这里。
+ * Invariant 4（改锁定检查后旧 run 不再作证，投影部分）、Invariant 6（授权三段式，M2-3）。
+ * Invariant 1（claim 不能产生已验证）的投影部分也在这里；Invariant 5（所有合并经过合并门）见 test/server/auth.test.ts。
  */
 import { describe, expect, it } from 'vitest';
 import { Ledger } from '../../src/ledger/index.js';
@@ -11,6 +12,8 @@ import type { FeatureView } from '../../src/projection/projection.js';
 import { routesOf } from '../../src/server/http.js';
 import { CURRENT, LineBuilder } from '../helpers/lines.js';
 import { FAIL, serverProject } from '../helpers/server.js';
+import { nodeConfig } from '../helpers/project.js';
+import type { Event } from '../../src/ledger/types.js';
 
 /** 一个"想把东西写成已验证"的请求体：覆盖各种可能的字段名。 */
 const FORGED = {
@@ -59,11 +62,16 @@ describe('Invariant 2：不存在任何 API 能直接把功能写成已验证', 
       .map((r) => `${r.method} ${r.url}`)
       .sort();
     expect(writes).toEqual([
+      'POST /api/auth',
+      'POST /api/auth/:authId/dismiss',
       'POST /api/changes',
       'POST /api/changes/:id/check',
       'POST /api/changes/:id/examples',
       'POST /api/changes/:id/examples/lock',
+      'POST /api/changes/:id/merge',
       'POST /api/changes/:id/track',
+      'POST /api/examples/:id/relock',
+      'POST /api/examples/:id/restore',
       'POST /api/guard/pre-tool-use',
       'POST /api/ledger/accept',
       'POST /api/runs',
@@ -123,5 +131,69 @@ describe('Invariant 4（投影部分）：修改锁定检查后旧 run 不再作
       .add({ type: 'example.locked', exampleId: 'e', checkPath: '.stagent/checks/e.mjs', checkHash: 'new-hash', by: 'user' });
     const x = project(b.lines, CURRENT).features[0]!.examples[0]!;
     expect(x).toMatchObject({ state: 'unverified', reason: 'not_run', checkHash: 'new-hash' });
+  });
+});
+
+describe('Invariant 6：授权三段式', () => {
+  /** 每个带 authId 的副作用事件之前必须有同一 authId 的 auth.consumed，之后必须有 auth.settled；每个授权只消费一次。 */
+  function checkAuthInvariant(events: Event[]): string[] {
+    const problems: string[] = [];
+    const consumed = new Map<string, number>();
+    const settled = new Map<string, number>();
+    events.forEach((e, i) => {
+      if (e.type === 'auth.consumed') {
+        if (consumed.has(e.authId)) problems.push(`${e.authId} 被消费两次`);
+        consumed.set(e.authId, i);
+      } else if (e.type === 'auth.settled') settled.set(e.authId, i);
+    });
+    events.forEach((e, i) => {
+      const authId = (e as { authId?: string }).authId;
+      if (!authId || e.type.startsWith('auth.')) return;
+      const c = consumed.get(authId);
+      const s = settled.get(authId);
+      if (c === undefined || c > i) problems.push(`${e.type} 之前没有 ${authId} 的 auth.consumed`);
+      if (s === undefined || s < i) problems.push(`${e.type} 之后没有 ${authId} 的 auth.settled`);
+    });
+    for (const [authId, c] of consumed) {
+      const granted = events.findIndex((e) => e.type === 'auth.granted' && e.authId === authId);
+      if (granted === -1 || granted > c) problems.push(`${authId} 消费前没有 auth.granted`);
+    }
+    return problems;
+  }
+
+  it('合并、强行合并、放弃、修改锁定、退役、发布之后，账本满足三段式', async () => {
+    const p = await serverProject(nodeConfig({ releaseCommand: 'true', flakyRetries: 0 }));
+    const a = await p.lock('登录', '.stagent/checks/a.mjs', 'process.exit(0);\n');
+    await p.runAll();
+    expect((await p.call('POST', `/api/changes/${a.changeId}/merge`)).status).toBe(200);
+
+    const b = await p.lock('支付', '.stagent/checks/b.mjs', FAIL);
+    await p.runAll();
+    expect((await p.call('POST', '/api/auth', { action: 'merge_override', changeId: b.changeId, reason: '先上线再修支付' })).status).toBe(200);
+
+    const c = await p.lock('优惠券', '.stagent/checks/c.mjs', 'process.exit(0);\n');
+    expect((await p.call('POST', '/api/auth', { action: 'abandon', changeId: c.changeId, reason: '优惠券不做了' })).status).toBe(200);
+    expect((await p.call('POST', '/api/auth', { action: 'modify_locked', exampleId: a.exampleId, reason: '例子需要更新' })).status).toBe(200);
+    expect((await p.call('POST', '/api/auth', { action: 'delete', featureId: b.featureId, reason: '支付功能下线' })).status).toBe(200);
+    expect((await p.call('POST', '/api/auth', { action: 'release', reason: '发布 v1' })).status).toBe(200);
+
+    const events = (await Ledger.open(p.root)).events();
+    expect(events.filter((e) => e.type === 'auth.consumed')).toHaveLength(6);
+    expect(checkAuthInvariant(events)).toEqual([]);
+  });
+
+  it('检查器能发现违规（自检）', () => {
+    expect(
+      checkAuthInvariant([
+        { type: 'change.merged', changeId: 'c', mergeCommit: 'm', authId: 'a1' },
+        { type: 'auth.consumed', authId: 'a2', action: 'release' },
+        { type: 'auth.consumed', authId: 'a2', action: 'release' },
+      ]),
+    ).toEqual([
+      'a2 被消费两次',
+      'change.merged 之前没有 a1 的 auth.consumed',
+      'change.merged 之后没有 a1 的 auth.settled',
+      'a2 消费前没有 auth.granted',
+    ]);
   });
 });

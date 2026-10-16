@@ -14,9 +14,10 @@ import { computeWorkTreeHash, type WorkTreeHashResult } from '../evidence/worktr
 import { CHECKS_RELATIVE_DIR, runChecks, type CheckSpec } from '../executor/executor.js';
 import { git, headCommit, isAncestor, UNBORN_COMMIT } from '../git/git.js';
 import { assertReason, Ledger, LedgerLockedError } from '../ledger/ledger.js';
-import type { ExampleKind, LedgerLine, Track } from '../ledger/types.js';
+import type { AuthAction, EventOf, ExampleKind, LedgerLine, Track } from '../ledger/types.js';
 import { buildOverview, type Overview, type RunProgressView } from '../projection/overview.js';
 import { project, type FeatureView, type LedgerProjection } from '../projection/projection.js';
+import { AuthError, Authorizer, restoreLockedCheck, snapshotForRelock, type AuthRequest, type AuthResult, type DanglingAuth, type TamperedCheck } from './auth.js';
 import { EventBus } from './event-bus.js';
 import { WorkspaceWatcher } from './watcher.js';
 
@@ -36,6 +37,8 @@ export interface ServiceOptions {
   watchDebounceMs?: number;
   /** 外部改动静止后自动进入检查（默认 true）。 */
   autoCheckExternal?: boolean;
+  /** 测试用：模拟某个授权动作在消费后、副作用前崩溃。 */
+  crashBefore?: AuthAction;
 }
 
 /** 一次读盘得到的完整状态。 */
@@ -46,7 +49,11 @@ interface Snapshot {
   changes: ChangesProjection;
 }
 
-export type OverviewResponse = Overview & { runError: string | null; project: { name: string; branch: string | null } };
+export type OverviewResponse = Overview & {
+  runError: string | null;
+  project: { name: string; branch: string | null };
+  auth: { dangling: DanglingAuth[]; tamperedChecks: TamperedCheck[]; releaseConfigured: boolean };
+};
 
 export class StagentService {
   readonly bus = new EventBus();
@@ -60,11 +67,38 @@ export class StagentService {
   private settling: Promise<void> = Promise.resolve();
   private activeIdCache: string | null = null;
 
+  readonly authorizer: Authorizer;
+
   private constructor(
     readonly root: string,
     readonly ledger: Ledger,
     private readonly options: ServiceOptions,
-  ) {}
+  ) {
+    this.authorizer = new Authorizer(
+      {
+        root,
+        ledger,
+        config: () => this.config(),
+        state: async () => {
+          const s = await this.snapshot();
+          return {
+            lines: s.lines,
+            features: s.projection.features,
+            active: s.changes.active,
+            changes: s.changes.changes,
+            workTreeHash: s.current.workTreeHash,
+          };
+        },
+        write: (fn) => this.write(fn),
+        isRunning: () => this.run !== null,
+        acknowledgeWorkTree: async () => {
+          this.lastSeenWorkTreeHash = (await this.snapshot()).current.workTreeHash;
+        },
+        requestRegression: async () => this.requestCheck(await this.snapshot()),
+      },
+      options.crashBefore ? { crashBefore: options.crashBefore } : {},
+    );
+  }
 
   /** 打开账本（版本不符会抛错）；账本完好时清理孤儿快照。 */
   static async open(root: string, options: ServiceOptions = {}): Promise<StagentService> {
@@ -97,14 +131,25 @@ export class StagentService {
   }
 
   async overview(): Promise<OverviewResponse> {
-    const { projection, changes } = await this.snapshot();
+    const { projection, changes, lines } = await this.snapshot();
+    const auth = {
+      dangling: this.authorizer.dangling(lines),
+      tamperedChecks: await this.authorizer.tamperedChecks(projection.features),
+      releaseConfigured: !!(await this.config()).releaseCommand,
+    };
     const overview = buildOverview({
       projection,
       ledger: { state: this.ledger.state, brokenLinks: this.ledger.report.brokenLinks },
       run: this.run ? publicRun(this.run) : null,
       change: changes.active,
+      auth,
     });
-    return { ...overview, runError: this.lastRunError, project: { name: basename(this.root), branch: await currentBranch(this.root) } };
+    return {
+      ...overview,
+      runError: this.lastRunError,
+      project: { name: basename(this.root), branch: await currentBranch(this.root) },
+      auth,
+    };
   }
 
   async features(): Promise<FeatureView[]> {
@@ -422,7 +467,8 @@ export class StagentService {
    * 记一条 change.unmanaged_commit，并补跑全量回归（§5.3）。启动时与监听期间定时调用。
    */
   async checkHead(): Promise<boolean> {
-    if (this.ledger.state === 'locked') return false;
+    // 授权事务（合并）进行中时 HEAD 的前进是 Stagent 自己造成的。
+    if (this.ledger.state === 'locked' || this.authorizer.inProgress) return false;
     const snap = await this.snapshot();
     const known = knownHead(snap.lines);
     const head = await headCommit(this.root);
@@ -440,6 +486,88 @@ export class StagentService {
       return;
     }
     await this.startRegression().catch(() => undefined);
+  }
+
+  // ---- 授权与合并门（§6） ----
+
+  async authorize(req: AuthRequest): Promise<AuthResult> {
+    try {
+      return await this.authorizer.authorize(req);
+    } catch (err) {
+      throw err instanceof AuthError ? new HttpError(err.statusCode, err.message) : err;
+    }
+  }
+
+  /** POST /api/changes/:id/merge：合并（服务端合并门 + 授权三段式，免填原因）。 */
+  merge(changeId: string): Promise<AuthResult> {
+    return this.authorize({ action: 'merge', changeId });
+  }
+
+  async abandonPreview(changeId: string) {
+    try {
+      return await this.authorizer.abandonPreview(changeId);
+    } catch (err) {
+      throw err instanceof AuthError ? new HttpError(err.statusCode, err.message) : err;
+    }
+  }
+
+  async dismissDangling(authId: string): Promise<void> {
+    this.assertWritable();
+    try {
+      await this.authorizer.dismissDangling(authId);
+    } catch (err) {
+      throw err instanceof AuthError ? new HttpError(err.statusCode, err.message) : err;
+    }
+  }
+
+  /** 「还原锁定文件」：把工作区里被改的锁定检查恢复成快照内容（不需要授权）。 */
+  async restoreLockedCheck(exampleId: string): Promise<void> {
+    this.assertWritable();
+    const x = (await this.features()).flatMap((f) => f.examples).find((e) => e.exampleId === exampleId);
+    if (!x) throw new HttpError(404, `例子 ${exampleId} 不是锁定例子`);
+    await restoreLockedCheck(this.root, x.checkPath, x.checkHash);
+    this.bus.publish('workspace.changed', { restored: x.checkPath });
+  }
+
+  /**
+   * 「授权修改锁定例子」之后重新锁定（解锁 → 改 → 重锁 → 自动回归）：
+   * 只接受经 modify_locked 授权解锁的例子；可同时更新情况 / 操作 / 期望。
+   */
+  async relockExample(exampleId: string, input: Record<string, unknown>): Promise<void> {
+    this.assertWritable();
+    const snap = await this.snapshot();
+    const grantedAction = new Map<string, AuthAction>();
+    let draft: EventOf<'example.drafted'> | null = null;
+    let unlockedBy: string | null = null;
+    for (const { event: e } of snap.lines) {
+      if (e.type === 'auth.granted') grantedAction.set(e.authId, e.action);
+      else if (e.type === 'example.drafted' && e.exampleId === exampleId) draft = e;
+      else if (e.type === 'example.locked' && e.exampleId === exampleId) unlockedBy = null;
+      else if (e.type === 'example.unlocked' && e.exampleId === exampleId) unlockedBy = e.authId ?? null;
+    }
+    if (!draft || !draft.checkPath) throw new HttpError(404, `例子 ${exampleId} 不存在`);
+    if (!unlockedBy || grantedAction.get(unlockedBy) !== 'modify_locked') {
+      throw new HttpError(409, '只有经「授权修改锁定例子」解锁的例子才能重新锁定');
+    }
+    if (!snap.projection.features.some((f) => f.featureId === draft!.featureId)) throw new HttpError(409, '例子所属功能已退役');
+    const text = (k: 'given' | 'when' | 'then') =>
+      typeof input[k] === 'string' && (input[k] as string).trim() ? (input[k] as string).trim() : draft![k];
+    const next = { given: text('given'), when: text('when'), then: text('then') };
+    let checkHash: string;
+    try {
+      checkHash = await snapshotForRelock(this.root, draft.checkPath);
+    } catch {
+      throw new HttpError(400, `检查文件 ${draft.checkPath} 不存在`);
+    }
+    const changeId = snap.changes.active?.changeId;
+    const { checkPath, featureId, kind } = draft;
+    await this.write(() =>
+      this.ledger.transaction(async (tx) => {
+        await tx.append({ type: 'example.drafted', exampleId, featureId, ...next, kind, checkPath, ...(changeId ? { changeId } : {}) });
+        await tx.append({ type: 'example.locked', exampleId, checkPath, checkHash, by: 'user', ...(changeId ? { changeId } : {}) });
+      }),
+    );
+    await this.requestCheck(await this.snapshot());
   }
 
   // ---- 账本 ----

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import type { ChangeView, ExampleView, FeatureView } from '../api';
+import type { ChangeView, ExampleView, FeatureView, OverviewResponse } from '../api';
 import { relativeTime } from '../format';
 import { ProgressSteps } from './ProgressSteps';
 
@@ -14,7 +14,18 @@ const REASON_TEXT: Record<NonNullable<ExampleView['reason']>, string> = {
 };
 
 /** 详情抽屉：本功能属于进行中的改动时显示档位与流程进度；证据区列出例子与原因。「改了什么」在 M4-2。 */
-export function FeatureDrawer({ feature, change, onClose }: { feature: FeatureView; change: ChangeView | null; onClose: () => void }) {
+interface Props {
+  feature: FeatureView;
+  change: ChangeView | null;
+  tampered: OverviewResponse['auth']['tamperedChecks'];
+  onClose: () => void;
+  onModify: (exampleId: string, label: string) => void;
+  onRestore: (exampleId: string) => void;
+  onRelock: (exampleId: string) => void;
+  onRetire: () => void;
+}
+
+export function FeatureDrawer({ feature, change, tampered, onClose, onModify, onRestore, onRelock, onRetire }: Props) {
   const inChange =
     change !== null &&
     (change.draftedExampleIds.some((id) => feature.examples.some((x) => x.exampleId === id)) ||
@@ -96,8 +107,42 @@ export function FeatureDrawer({ feature, change, onClose }: { feature: FeatureVi
               <p className="meta">
                 检查 <code>{x.checkPath}</code> · 锁定于 {relativeTime(x.lockedAt)}
               </p>
+              {tampered.some((t) => t.exampleId === x.exampleId) && (
+                <div className="banner banner-error">
+                  锁定检查在工作区被修改，合并门会拒绝。
+                  <button className="btn" onClick={() => onRestore(x.exampleId)}>
+                    还原锁定文件
+                  </button>
+                </div>
+              )}
+              <div className="example-actions">
+                <button className="btn btn-ghost" onClick={() => onModify(x.exampleId, `例子「${x.then}」`)}>
+                  授权修改这个例子
+                </button>
+              </div>
             </details>
           ))}
+          {feature.unlockedForEdit.length > 0 && (
+            <>
+              <h3 className="section-title">已授权解锁、等待重新锁定</h3>
+              {feature.unlockedForEdit.map((u) => (
+                <div key={u.exampleId} className="example ex-unverified">
+                  <div className="example-then">{u.then}</div>
+                  <p className="meta">
+                    {u.reason} · 改好 <code>{u.checkPath}</code> 后重新锁定，系统会写新快照并自动跑全量回归
+                  </p>
+                  <button className="btn btn-primary" onClick={() => onRelock(u.exampleId)}>
+                    重新锁定
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
+          <div className="drawer-footer">
+            <button className="btn btn-ghost-danger" onClick={onRetire}>
+              退役这个功能（需授权）
+            </button>
+          </div>
         </div>
       </aside>
     </>
