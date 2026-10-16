@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { LedgerVersionError } from '../ledger/verify.js';
+import { registerGuardRoutes } from './guard-routes.js';
 import { HttpError, type StagentService } from './service.js';
 
 /** 打包后的前端（vite build 输出）。src/server 与 dist/server 都在包根目录下两级。 */
@@ -56,6 +57,8 @@ export async function buildServer(service: StagentService, opts: BuildServerOpti
     await service.acceptLedger(typeof req.body?.reason === 'string' ? req.body.reason : '');
     return { ok: true };
   });
+
+  registerGuardRoutes(app, service);
 
   // 改动（§5）
   app.get('/api/changes', () => service.changes());

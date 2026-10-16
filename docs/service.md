@@ -50,6 +50,7 @@ npx stagent            # 启动服务（127.0.0.1:4310 起，被占用自动递�
 | POST | `/api/runs` | 手动全量回归（异步，202）；运行中 409，账本锁定 423 |
 | POST | `/api/runs/current/cancel` | 取消当前运行 |
 | POST | `/api/ledger/accept` | `{ reason }`，账本被修改时接受当前状态 |
+| POST | `/api/guard/pre-tool-use` | Claude Code hook 的 stdin 原样转发，返回 `{ decision, reason? }`；拒绝时写 `guard.blocked`（M2-1，见 [guard.md](guard.md)） |
 | GET | `/api/events/stream` | SSE：`run.started` / `run.progress` / `run.finished` / `run.failed` / `ledger.appended` / `ledger.locked`；支持 `Last-Event-ID` 续传，漏事件时发 `resync` |
 | — | `/api/changes…` | 改动流程（M2-2），见 [changes.md](changes.md)；M1 的临时演示入口 `/api/dev/*` 已删除 |
 

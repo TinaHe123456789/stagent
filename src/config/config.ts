@@ -35,7 +35,12 @@ export interface StagentConfig {
   };
   releaseCommand: string | null;
   budget: { perChange: number | null; perDay: number | null };
-  guard: { bashRules: string[] };
+  guard: {
+    /** 额外的 Bash 危险命令规则：正则源码或 `/源码/flags`（M2-1）。 */
+    bashRules: string[];
+    /** 是否安装 .git/hooks/pre-merge-commit 提醒脚本（只提醒、不阻止），默认 true。 */
+    preMergeReminder: boolean;
+  };
 }
 
 export const DEFAULT_CONFIG: StagentConfig = {
@@ -46,7 +51,7 @@ export const DEFAULT_CONFIG: StagentConfig = {
   evidence: { ignoreGlobs: ['**/*.md', 'LICENSE', 'LICENSE.*', '.cursor/rules/**'] },
   releaseCommand: null,
   budget: { perChange: null, perDay: null },
-  guard: { bashRules: [] },
+  guard: { bashRules: [], preMergeReminder: true },
 };
 
 export class ConfigError extends Error {
@@ -98,7 +103,10 @@ export function resolveConfig(raw: unknown): StagentConfig {
       perChange: positive(budget.perChange, 'budget.perChange') ?? null,
       perDay: positive(budget.perDay, 'budget.perDay') ?? null,
     },
-    guard: { bashRules: strArray(guard.bashRules, 'guard.bashRules') ?? [] },
+    guard: {
+      bashRules: strArray(guard.bashRules, 'guard.bashRules') ?? [],
+      preMergeReminder: bool(guard.preMergeReminder, 'guard.preMergeReminder') ?? d.guard.preMergeReminder,
+    },
   };
 }
 
@@ -130,6 +138,12 @@ function nonNegativeInt(v: unknown, name: string): number | undefined {
   if (v === undefined || v === null) return undefined;
   if (!Number.isInteger(v) || (v as number) < 0) fail(`${name} 必须是非负整数`);
   return v as number;
+}
+
+function bool(v: unknown, name: string): boolean | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'boolean') fail(`${name} 必须是 true 或 false`);
+  return v;
 }
 
 function strArray(v: unknown, name: string): string[] | undefined {
