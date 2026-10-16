@@ -18,6 +18,7 @@ npm run build   # 编译到 dist/
 - [x] M1-1 项目脚手架与账本内核（事件链）—— 见 [docs/ledger.md](docs/ledger.md)
 - [x] M1-2 检查快照、workTreeHash 与检查执行器 —— 见 [docs/executor.md](docs/executor.md)
 - [x] M1-3 状态投影、本地服务、init 与首页结论卡 —— 见 [docs/service.md](docs/service.md)
+- [x] M2-2 改动流程：两档、互斥、外部改动识别与状态机 —— 见 [docs/changes.md](docs/changes.md)
 
 ## CLI
 

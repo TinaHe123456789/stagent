@@ -10,7 +10,7 @@ npx stagent init       # 写 .stagent/、账本 meta 行、config.json 草稿、
 npx stagent            # 启动服务（127.0.0.1:4310 起，被占用自动递增），打开浏览器
 ```
 
-想先看效果：在 stagent 仓库里运行 `npm run demo`，它会在临时目录生成示例项目（购物车结算已验证、登录被破坏、支付结果不稳定、优惠券尚无例子），并在 `0.0.0.0:4310` 启动服务。
+想先看效果：在 stagent 仓库里运行 `npm run demo`，它会在临时目录生成示例项目，用一个新功能档改动锁定例子并检查（购物车结算已验证、登录被破坏、支付结果不稳定），然后在 `0.0.0.0:4310` 启动服务。
 
 ## 状态投影 `src/projection/projection.ts`
 
@@ -51,7 +51,7 @@ npx stagent            # 启动服务（127.0.0.1:4310 起，被占用自动递�
 | POST | `/api/runs/current/cancel` | 取消当前运行 |
 | POST | `/api/ledger/accept` | `{ reason }`，账本被修改时接受当前状态 |
 | GET | `/api/events/stream` | SSE：`run.started` / `run.progress` / `run.finished` / `run.failed` / `ledger.appended` / `ledger.locked`；支持 `Last-Event-ID` 续传，漏事件时发 `resync` |
-| POST | `/api/dev/features` · `/api/dev/features/:id/examples` | **M1 临时演示入口**：添加功能、锁定已写好的检查文件。M2-2 由正式改动流程替换 |
+| — | `/api/changes…` | 改动流程（M2-2），见 [changes.md](changes.md)；M1 的临时演示入口 `/api/dev/*` 已删除 |
 
 没有任何接口能直接把功能或例子写成已验证（Invariant 2）：已验证只能来自执行器写入的 `run.completed`。`test/invariants/` 会对每个写接口发伪造请求来验证这一点，新增写接口时测试里的接口清单也要一起更新。
 
@@ -65,7 +65,7 @@ npx stagent            # 启动服务（127.0.0.1:4310 起，被占用自动递�
 
 React + Vite，`npm run build` 输出到 `web/dist/` 并由服务托管。首页：结论卡、拦截提醒（守卫在 M2-1）、统计、功能表、临时演示入口；点击功能打开 470px 抽屉，显示例子的证据状态与原因。
 
-在 M2-2 接入文件监听之前，页面每 5 秒、以及窗口获得焦点时刷新一次，用来发现工作区变化（证据过期）。
+服务端在 M2-2 起监听工作区；页面在收到 SSE 事件、每 5 秒以及窗口获得焦点时刷新。
 
 ## 不在 M1-3
 

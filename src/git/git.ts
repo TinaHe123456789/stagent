@@ -45,3 +45,13 @@ export async function headCommit(cwd: string): Promise<string> {
 export function splitNul(out: string): string[] {
   return out.split('\0').filter((p) => p !== '');
 }
+
+/** a 是否是 b 的祖先（含相等）。 */
+export async function isAncestor(cwd: string, a: string, b: string): Promise<boolean> {
+  try {
+    await git(cwd, ['merge-base', '--is-ancestor', a, b]);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -57,12 +57,23 @@ export async function buildServer(service: StagentService, opts: BuildServerOpti
     return { ok: true };
   });
 
-  // M1 临时演示入口，M2-2 由正式改动流程替换。
-  app.post<{ Body: { name?: unknown } }>('/api/dev/features', async (req, reply) =>
-    reply.status(201).send(await service.devAddFeature(req.body ?? {})),
+  // 改动（§5）
+  app.get('/api/changes', () => service.changes());
+  app.post<{ Body: { description?: unknown; track?: unknown } }>('/api/changes', async (req, reply) =>
+    reply.status(201).send(await service.createChange(req.body ?? {})),
   );
-  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>('/api/dev/features/:id/examples', async (req, reply) =>
-    reply.status(201).send(await service.devLockExample(req.params.id, req.body ?? {})),
+  app.get<{ Params: { id: string } }>('/api/changes/:id', (req) => service.change(req.params.id));
+  app.post<{ Params: { id: string }; Body: { track?: unknown; reason?: unknown } }>('/api/changes/:id/track', (req) =>
+    service.setTrack(req.params.id, req.body ?? {}),
+  );
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>('/api/changes/:id/examples', async (req, reply) =>
+    reply.status(201).send(await service.draftExample(req.params.id, req.body ?? {})),
+  );
+  app.post<{ Params: { id: string }; Body: { exampleIds?: unknown } }>('/api/changes/:id/examples/lock', (req) =>
+    service.lockExamples(req.params.id, req.body ?? {}),
+  );
+  app.post<{ Params: { id: string } }>('/api/changes/:id/check', async (req, reply) =>
+    reply.status(202).send(await service.startCheck(req.params.id)),
   );
 
   app.get<{ Querystring: { lastEventId?: string } }>('/api/events/stream', (req, reply) => {

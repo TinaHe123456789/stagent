@@ -1,8 +1,10 @@
+import type { ChangeView, ChangesProjection } from '../../src/changes/changes';
 import type { Overview } from '../../src/projection/overview';
 import type { FeatureView } from '../../src/projection/projection';
 
 export type { CardAction, CardStatus, Overview } from '../../src/projection/overview';
 export type { ExampleView, FeatureView, UnverifiedReason } from '../../src/projection/projection';
+export type { ChangePhase, ChangeView, ChangesProjection } from '../../src/changes/changes';
 
 export type OverviewResponse = Overview & {
   runError: string | null;
@@ -36,15 +38,31 @@ export const api = {
   startRun: () => request<{ total: number }>('POST', '/api/runs'),
   cancelRun: () => request<{ ok: true }>('POST', '/api/runs/current/cancel'),
   acceptLedger: (reason: string) => request<{ ok: true }>('POST', '/api/ledger/accept', { reason }),
-  devAddFeature: (name: string) => request<{ featureId: string }>('POST', '/api/dev/features', { name }),
-  devLockExample: (featureId: string, body: Record<string, string>) =>
-    request<{ exampleId: string }>('POST', `/api/dev/features/${encodeURIComponent(featureId)}/examples`, body),
+  changes: () => request<ChangesProjection>('GET', '/api/changes'),
+  createChange: (description: string, track: 'small' | 'feature') =>
+    request<ChangeView>('POST', '/api/changes', { description, track }),
+  setTrack: (changeId: string, track: 'small' | 'feature') =>
+    request<ChangeView>('POST', `/api/changes/${encodeURIComponent(changeId)}/track`, { track }),
+  draftExample: (changeId: string, body: Record<string, string>) =>
+    request<{ exampleId: string; featureId: string }>('POST', `/api/changes/${encodeURIComponent(changeId)}/examples`, body),
+  lockExamples: (changeId: string) => request<ChangeView>('POST', `/api/changes/${encodeURIComponent(changeId)}/examples/lock`, {}),
+  startCheck: (changeId: string) => request<{ total: number }>('POST', `/api/changes/${encodeURIComponent(changeId)}/check`),
 };
 
 /** 订阅服务端事件；任何事件都触发 onChange。EventSource 自带 Last-Event-ID 续传。 */
 export function subscribe(onChange: (type: string) => void): () => void {
   const es = new EventSource('/api/events/stream');
-  const types = ['run.started', 'run.progress', 'run.finished', 'run.failed', 'ledger.appended', 'ledger.locked', 'resync'];
+  const types = [
+    'run.started',
+    'run.progress',
+    'run.finished',
+    'run.failed',
+    'ledger.appended',
+    'ledger.locked',
+    'change.started',
+    'workspace.changed',
+    'resync',
+  ];
   for (const t of types) es.addEventListener(t, () => onChange(t));
   return () => es.close();
 }

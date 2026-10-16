@@ -6,7 +6,9 @@ interface Props {
   onRun: () => void;
   onCancel: () => void;
   onAcceptLedger: (reason: string) => void;
-  onAddFeature: () => void;
+  onNewChange: (track: 'small' | 'feature') => void;
+  onLockExamples: () => void;
+  onStartCheck: () => void;
 }
 
 const VERDICT: Record<OverviewResponse['status'], string> = {
@@ -18,12 +20,15 @@ const VERDICT: Record<OverviewResponse['status'], string> = {
   empty: '先描述第一个功能并锁定它的验收例子',
 };
 
-export function ConclusionCard({ overview, onRun, onCancel, onAcceptLedger, onAddFeature }: Props) {
+export function ConclusionCard({ overview, onRun, onCancel, onAcceptLedger, onNewChange, onLockExamples, onStartCheck }: Props) {
   const [reason, setReason] = useState('');
   const handlers: Partial<Record<CardAction['id'], () => void>> = {
     run_regression: onRun,
     cancel_run: onCancel,
-    add_feature: onAddFeature,
+    add_feature: () => onNewChange('feature'),
+    new_change: () => onNewChange('small'),
+    lock_examples: onLockExamples,
+    start_check: onStartCheck,
     accept_ledger: () => onAcceptLedger(reason),
   };
 
