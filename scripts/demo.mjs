@@ -5,7 +5,7 @@
  *   npm run demo                 # 构建后在 0.0.0.0:4310 启动
  *   PORT=4400 node scripts/demo.mjs
  *
- * 示例状态：购物车结算已验证、登录被破坏、支付结果不稳定、优惠券尚无例子。
+ * 示例状态：一个进行中的新功能档改动被阻止——购物车结算已验证、登录被破坏、支付结果不稳定。
  * 需要先 npm run build（npm run demo 会自动构建）。
  */
 import { execFileSync } from 'node:child_process';
@@ -70,25 +70,24 @@ const call = async (method, path, body) => {
   });
   return res.json();
 };
-const feature = async (name) => (await call('POST', '/api/dev/features', { name })).featureId;
-const lock = (fid, given, when, then, checkPath) => call('POST', `/api/dev/features/${fid}/examples`, { given, when, then, checkPath });
+// 用新功能档的改动登记功能与例子（M3 起由 Claude Code 起草，这里直接用写好的检查文件）。
+const change = await call('POST', '/api/changes', { description: '接入购物车、登录与支付', track: 'feature' });
+const draft = async (feature, given, when, then, checkPath) =>
+  call('POST', `/api/changes/${change.changeId}/examples`, { ...feature, given, when, then, checkPath });
 
-const cart = await feature('购物车结算');
-await lock(cart, '购物车里有 2 件 10 元和 1 件 5 元的商品', '查看合计', '合计显示 25 元', '.stagent/checks/cart/total.mjs');
-await lock(cart, '购物车为空', '查看合计', '合计显示 0 元', '.stagent/checks/cart/empty.mjs');
-const login = await feature('登录');
-await lock(login, '用户 alice 已注册', '输入正确密码登录', '登录成功', '.stagent/checks/login/ok.mjs');
-await lock(login, '用户 alice 已注册', '输入错误密码登录', '提示密码错误，不能登录', '.stagent/checks/login/wrong.mjs');
-const pay = await feature('支付');
-await lock(pay, '订单金额 25 元', '点击支付', '支付成功', '.stagent/checks/pay/ok.mjs');
-await feature('优惠券');
+const cart = await draft({ featureName: '购物车结算' }, '购物车里有 2 件 10 元和 1 件 5 元的商品', '查看合计', '合计显示 25 元', '.stagent/checks/cart/total.mjs');
+await draft({ featureId: cart.featureId }, '购物车为空', '查看合计', '合计显示 0 元', '.stagent/checks/cart/empty.mjs');
+const login = await draft({ featureName: '登录' }, '用户 alice 已注册', '输入正确密码登录', '登录成功', '.stagent/checks/login/ok.mjs');
+await draft({ featureId: login.featureId }, '用户 alice 已注册', '输入错误密码登录', '提示密码错误，不能登录', '.stagent/checks/login/wrong.mjs');
+await draft({ featureName: '支付' }, '订单金额 25 元', '点击支付', '支付成功', '.stagent/checks/pay/ok.mjs');
+await call('POST', `/api/changes/${change.changeId}/examples/lock`, {});
 
 // 改坏登录：错误密码也能登录。
 await writeFile(
   join(root, 'src/shop.mjs'),
   files['src/shop.mjs'].replace("user === 'alice' && pass === 'secret'", "user === 'alice'"),
 );
-await call('POST', '/api/runs');
+await call('POST', `/api/changes/${change.changeId}/check`);
 await running.service.waitForRun();
 
 console.log(`Stagent 演示已启动：${running.url}（示例项目 ${root}）`);

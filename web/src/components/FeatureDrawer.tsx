@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
-import type { ExampleView, FeatureView } from '../api';
+import type { ChangeView, ExampleView, FeatureView } from '../api';
 import { relativeTime } from '../format';
+import { ProgressSteps } from './ProgressSteps';
 
 const STATE_TEXT: Record<ExampleView['state'], string> = { verified: '已验证', failed: '失败', unverified: '未验证' };
 const REASON_TEXT: Record<NonNullable<ExampleView['reason']>, string> = {
@@ -12,8 +13,12 @@ const REASON_TEXT: Record<NonNullable<ExampleView['reason']>, string> = {
   not_run: '未执行',
 };
 
-/** 详情抽屉（M1-3 只有证据区；档位、进度条与改动部分在 M2-2）。 */
-export function FeatureDrawer({ feature, onClose }: { feature: FeatureView; onClose: () => void }) {
+/** 详情抽屉：本功能属于进行中的改动时显示档位与流程进度；证据区列出例子与原因。「改了什么」在 M4-2。 */
+export function FeatureDrawer({ feature, change, onClose }: { feature: FeatureView; change: ChangeView | null; onClose: () => void }) {
+  const inChange =
+    change !== null &&
+    (change.draftedExampleIds.some((id) => feature.examples.some((x) => x.exampleId === id)) ||
+      change.pendingDrafts.some((d) => d.featureId === feature.featureId));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -34,6 +39,17 @@ export function FeatureDrawer({ feature, onClose }: { feature: FeatureView; onCl
           </button>
         </header>
         <div className="drawer-body">
+          {inChange && change && (
+            <div className="drawer-change">
+              <div className="meta">
+                {change.track === 'feature' ? '新功能档' : '小改动档'} · {change.description} · 当前：{change.phaseLabel}
+              </div>
+              <ProgressSteps change={change} />
+            </div>
+          )}
+          {change?.phase === 'blocked' && change.blockers.length > 0 && (
+            <div className="banner banner-error">被阻止：{change.blockers[0]}</div>
+          )}
           <h3 className="section-title">证据 · 本功能的例子</h3>
           {feature.examples.length === 0 && (
             <p className="muted">尚无锁定例子。{feature.draftCount > 0 ? `有 ${feature.draftCount} 个草稿待锁定。` : ''}</p>

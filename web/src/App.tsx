@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, subscribe, type FeatureView, type OverviewResponse } from './api';
 import { ConclusionCard } from './components/ConclusionCard';
-import { DevPanel } from './components/DevPanel';
+import { ChangePanel } from './components/ChangePanel';
+import { NewChange } from './components/NewChange';
 import { FeatureDrawer } from './components/FeatureDrawer';
 import { FeatureTable } from './components/FeatureTable';
 import { GuardNotice } from './components/GuardNotice';
 import { Stats } from './components/Stats';
 import { TopBar } from './components/TopBar';
 
-/** 工作区的变化（证据过期）在 M2-2 接入文件监听前靠轮询发现。 */
+/** 兜底轮询：服务端监听到的工作区变化会经 SSE 推送，这里再定时刷新一次以防漏事件。 */
 const POLL_MS = 5000;
 
 export function App() {
@@ -16,7 +17,7 @@ export function App() {
   const [features, setFeatures] = useState<FeatureView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [devOpen, setDevOpen] = useState(false);
+  const [newOpen, setNewOpen] = useState<null | 'small' | 'feature'>(null);
   const pending = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
@@ -64,6 +65,8 @@ export function App() {
   );
 
   const openFeature = features.find((f) => f.featureId === openId) ?? null;
+  const change = overview?.change ?? null;
+  const locked = overview?.ledger.state === 'locked';
 
   return (
     <div className="app">
@@ -83,23 +86,43 @@ export function App() {
               onRun={() => act(api.startRun)}
               onCancel={() => act(api.cancelRun)}
               onAcceptLedger={(reason) => act(() => api.acceptLedger(reason))}
-              onAddFeature={() => setDevOpen(true)}
+              onNewChange={(track) => {
+                setNewOpen(track);
+                setTimeout(() => document.getElementById('new-change')?.scrollIntoView({ behavior: 'smooth' }), 0);
+              }}
+              onLockExamples={() => change && act(() => api.lockExamples(change.changeId))}
+              onStartCheck={() => change && act(() => api.startCheck(change.changeId))}
             />
             {overview.runError && <div className="banner banner-error">上次运行被拒绝：{overview.runError}</div>}
             <GuardNotice block={overview.lastGuardBlock} />
+            {change && (
+              <ChangePanel
+                change={change}
+                features={features}
+                disabled={locked}
+                onSetTrack={(track) => act(() => api.setTrack(change.changeId, track))}
+                onDraft={(body) => act(() => api.draftExample(change.changeId, body))}
+                onLock={() => act(() => api.lockExamples(change.changeId))}
+                onCheck={() => act(() => api.startCheck(change.changeId))}
+              />
+            )}
+            {!change && (newOpen || features.length > 0) && (
+              <NewChange
+                key={newOpen ?? 'default'}
+                disabled={locked}
+                defaultTrack={newOpen ?? 'small'}
+                onCreate={async (description, track) => {
+                  await act(() => api.createChange(description, track));
+                  setNewOpen(null);
+                }}
+              />
+            )}
             {overview.stats.features > 0 && <Stats stats={overview.stats} />}
             {features.length > 0 && <FeatureTable features={features} onOpen={setOpenId} />}
-            <DevPanel
-              open={devOpen || features.length > 0}
-              features={features}
-              disabled={overview.ledger.state === 'locked'}
-              onAddFeature={(name) => act(() => api.devAddFeature(name))}
-              onLockExample={(id, body) => act(() => api.devLockExample(id, body))}
-            />
           </>
         )}
       </main>
-      {openFeature && <FeatureDrawer feature={openFeature} onClose={() => setOpenId(null)} />}
+      {openFeature && <FeatureDrawer feature={openFeature} change={change} onClose={() => setOpenId(null)} />}
     </div>
   );
 }

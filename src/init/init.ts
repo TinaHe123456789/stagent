@@ -1,12 +1,14 @@
 /**
  * stagent init（规格 §9 第 1 步，不含扫描）：
- * 写入 .stagent/ 目录、账本 meta 行、.gitignore 条目，检测技术栈生成 config.json 草稿。
+ * 写入 .stagent/ 目录、账本 meta 行、.gitignore 条目，检测技术栈生成 config.json 草稿；
+ * M2-1 起还写入 .claude/settings.json 的 PreToolUse 守卫 hook 与 .git/hooks/pre-merge-commit 提醒（见 src/guard/install.ts）。
  *
- * 不在 M1-3：PreToolUse hooks（M2-1）、~/.stagent 链头（M6-1）、扫描功能（M4-1）。
+ * 不在本模块：~/.stagent 链头（M6-1）、扫描功能（M4-1）。
  */
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { CONFIG_RELATIVE_PATH, DEFAULT_CONFIG } from '../config/config.js';
+import { CONFIG_RELATIVE_PATH, DEFAULT_CONFIG, resolveConfig } from '../config/config.js';
+import { CLAUDE_SETTINGS_RELATIVE_PATH, installClaudeHook, installPreMergeReminder, type PreMergeReminderStatus } from '../guard/install.js';
 import { isGitRepo } from '../git/git.js';
 import { Ledger } from '../ledger/ledger.js';
 
@@ -20,6 +22,9 @@ export interface InitResult {
   gitignoreAdded: string[];
   config: Record<string, unknown>;
   detected: DetectedStack;
+  /** 本次新写入了 .claude/settings.json 的 PreToolUse 守卫 hook（已存在时为 false）。 */
+  hooksInstalled: boolean;
+  preMergeReminder: PreMergeReminderStatus;
   warnings: string[];
 }
 
@@ -57,7 +62,29 @@ export async function initProject(projectRoot: string): Promise<InitResult> {
   }
 
   const gitignoreAdded = await ensureGitignore(projectRoot);
-  return { projectId: ledger.projectId ?? '', created, gitignoreAdded, config, detected, warnings };
+
+  const hook = await installClaudeHook(projectRoot);
+  if (hook.createdFile) created.push(CLAUDE_SETTINGS_RELATIVE_PATH);
+  if (hook.warning) warnings.push(hook.warning);
+  let reminderEnabled = DEFAULT_CONFIG.guard.preMergeReminder;
+  try {
+    reminderEnabled = resolveConfig(config).guard.preMergeReminder;
+  } catch (err) {
+    warnings.push(`config.json 校验失败（${(err as Error).message}），合并提醒按默认安装`);
+  }
+  const reminder = await installPreMergeReminder(projectRoot, reminderEnabled);
+  if (reminder.warning) warnings.push(reminder.warning);
+
+  return {
+    projectId: ledger.projectId ?? '',
+    created,
+    gitignoreAdded,
+    config,
+    detected,
+    hooksInstalled: hook.installed,
+    preMergeReminder: reminder.status,
+    warnings,
+  };
 }
 
 export async function detectStack(projectRoot: string): Promise<DetectedStack> {

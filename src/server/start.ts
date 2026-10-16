@@ -18,6 +18,8 @@ export interface StartOptions {
   host?: string;
   open?: boolean;
   serveWeb?: boolean;
+  /** 监听工作区与 HEAD（默认 true）。 */
+  watch?: boolean;
 }
 
 export interface RunningService {
@@ -32,8 +34,12 @@ export async function startService(opts: StartOptions): Promise<RunningService> 
   if (!(await isGitRepo(opts.root))) throw new Error('当前目录不是 git 仓库，请先 git init 并运行 stagent init');
   const lock = await acquireServiceLock(opts.root);
   let app: FastifyInstance | null = null;
+  let service: StagentService | null = null;
   try {
-    const service = await StagentService.open(opts.root);
+    service = await StagentService.open(opts.root);
+    // 启动时补查：上次关闭后有没有在 Stagent 之外直接 git commit（§5.3）。
+    await service.checkHead().catch(() => false);
+    if (opts.watch !== false) await service.startWatching();
     app = await buildServer(service, { serveWeb: opts.serveWeb });
     const host = opts.host ?? '127.0.0.1';
     const port = await listenFrom(app, opts.port ?? DEFAULT_PORT, host);
@@ -45,10 +51,11 @@ export async function startService(opts: StartOptions): Promise<RunningService> 
       port,
       service,
       app,
-      close: () => shutdown(app!, service, lock),
+      close: () => shutdown(app!, service!, lock),
     };
     return running;
   } catch (err) {
+    await service?.stopWatching();
     await app?.close();
     await lock.release();
     throw err;
@@ -75,6 +82,7 @@ function portFree(port: number, host: string): Promise<boolean> {
 }
 
 async function shutdown(app: FastifyInstance, service: StagentService, lock: ServiceLock): Promise<void> {
+  await service.stopWatching();
   if (service.running) service.cancelRun();
   await service.waitForRun();
   await app.close();

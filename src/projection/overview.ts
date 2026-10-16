@@ -5,6 +5,7 @@
  * 另有空账本（还没有任何已验证功能）的引导状态。原因最多 3 条，按严重程度排序；
  * 被禁用的按钮必须带原因。
  */
+import type { ChangeView } from '../changes/changes.js';
 import type { BrokenLink } from '../ledger/verify.js';
 import type { ExampleView, FeatureView, LedgerProjection, UnverifiedReason } from './projection.js';
 
@@ -19,7 +20,19 @@ export const CARD_STATUS_LABELS: Record<CardStatus, { icon: string; title: strin
   empty: { icon: '📒', title: '还没有任何已验证功能' },
 };
 
-export type ActionId = 'run_regression' | 'cancel_run' | 'accept_ledger' | 'merge' | 'add_feature' | 'scan';
+export type ActionId =
+  | 'run_regression'
+  | 'cancel_run'
+  | 'accept_ledger'
+  | 'merge'
+  | 'add_feature'
+  | 'scan'
+  | 'new_change'
+  | 'lock_examples'
+  | 'start_check'
+  | 'fix'
+  | 'merge_override'
+  | 'confirm_visual';
 
 export interface CardAction {
   id: ActionId;
@@ -58,6 +71,8 @@ export interface Overview {
   slowRunHint: { durationMs: number; slowest: { exampleId: string; durationMs: number }[] } | null;
   lastGuardBlock: LedgerProjection['lastGuardBlock'];
   ledger: { state: 'ok' | 'locked'; brokenLinks: BrokenLink[] };
+  /** 进行中的改动（同一时间最多一个）。 */
+  change: ChangeView | null;
 }
 
 export const SLOW_RUN_MS = 5 * 60 * 1000;
@@ -78,9 +93,10 @@ export interface OverviewInput {
   projection: LedgerProjection;
   ledger: { state: 'ok' | 'locked'; brokenLinks: BrokenLink[] };
   run: RunProgressView | null;
+  change?: ChangeView | null;
 }
 
-export function buildOverview({ projection, ledger, run }: OverviewInput): Overview {
+export function buildOverview({ projection, ledger, run, change = null }: OverviewInput): Overview {
   const features = projection.features;
   const examples = features.flatMap((f) => f.examples);
   const stats = {
@@ -97,7 +113,7 @@ export function buildOverview({ projection, ledger, run }: OverviewInput): Overv
     projection.lastRun && projection.lastRun.durationMs > SLOW_RUN_MS
       ? { durationMs: projection.lastRun.durationMs, slowest: projection.lastRun.slowest }
       : null;
-  const common = { stats, run, slowRunHint, lastGuardBlock: projection.lastGuardBlock, ledger };
+  const common = { stats, run, slowRunHint, lastGuardBlock: projection.lastGuardBlock, ledger, change };
 
   const mergeCounts = [failed.length ? `${failed.length} 失败` : '', unverified.length ? `${unverified.length} 未验证` : '']
     .filter(Boolean)
@@ -106,9 +122,13 @@ export function buildOverview({ projection, ledger, run }: OverviewInput): Overv
     id: 'merge',
     label: mergeCounts ? `合并（${mergeCounts}）` : '合并',
     enabled: false,
-    disabledReason: mergeCounts
-      ? `还有 ${mergeCounts}，且当前没有进行中的改动`
-      : '当前没有进行中的改动（改动流程在 M2 提供）',
+    disabledReason: !change
+      ? '当前没有进行中的改动'
+      : mergeCounts
+        ? `还有 ${mergeCounts}`
+        : change.phase === 'mergeable'
+          ? '合并门在 M2-3 提供'
+          : `改动处于「${change.phaseLabel}」阶段`,
   };
   const runAction = (primary: boolean): CardAction =>
     examples.length > 0
@@ -152,6 +172,8 @@ export function buildOverview({ projection, ledger, run }: OverviewInput): Overv
     };
   }
 
+  if (change) return changeCard(change, { common, reasons, merge, runAction });
+
   if (features.length === 0) {
     return {
       ...common,
@@ -175,7 +197,7 @@ export function buildOverview({ projection, ledger, run }: OverviewInput): Overv
       ...CARD_STATUS_LABELS.blocked,
       canContinue: false,
       reasons,
-      actions: [runAction(needsRun || failed.length === 0), merge],
+      actions: [runAction(needsRun || failed.length === 0), newChange(false), merge],
     };
   }
 
@@ -185,8 +207,87 @@ export function buildOverview({ projection, ledger, run }: OverviewInput): Overv
     ...CARD_STATUS_LABELS.ok,
     canContinue: true,
     reasons,
-    actions: [runAction(false), merge],
+    actions: [newChange(true), runAction(false), merge],
   };
+}
+
+function newChange(primary: boolean): CardAction {
+  return { id: 'new_change', label: '描述一个改动', enabled: true, primary };
+}
+
+/** 有进行中的改动时，结论卡围绕它回答"能不能继续、差什么、要我做什么"。 */
+function changeCard(
+  change: ChangeView,
+  ctx: {
+    common: Omit<Overview, 'status' | 'icon' | 'title' | 'canContinue' | 'reasons' | 'actions'>;
+    reasons: CardReason[];
+    merge: CardAction;
+    runAction: (primary: boolean) => CardAction;
+  },
+): Overview {
+  const { common, merge } = ctx;
+  const head: CardReason[] = change.blockers.slice(0, 3).map((text, i) => ({ severity: i === 0 ? 1 : 2, text, featureIds: [] }));
+  const top3 = (extra: CardReason[]) => [...extra, ...ctx.reasons.filter((r) => !extra.some((e) => e.text === r.text))].slice(0, 3);
+  const name = change.description ? `「${change.description}」` : '';
+  switch (change.phase) {
+    case 'confirm_examples':
+    case 'red_check':
+      return {
+        ...common,
+        status: 'needs_you',
+        ...CARD_STATUS_LABELS.needs_you,
+        canContinue: false,
+        reasons: top3(head),
+        actions: [
+          change.pendingDraftIds.length > 0
+            ? { id: 'lock_examples', label: `确认并锁定 ${change.pendingDraftIds.length} 个例子`, enabled: true, primary: true }
+            : { id: 'lock_examples', label: '确认并锁定例子', enabled: false, disabledReason: '先起草至少一个例子', primary: true },
+          merge,
+        ],
+      };
+    case 'implementing':
+      return {
+        ...common,
+        status: 'blocked',
+        ...CARD_STATUS_LABELS.blocked,
+        canContinue: false,
+        reasons: top3(head.length ? head : [{ severity: 1, text: `改动${name}实现中`, featureIds: [] }]),
+        actions: [{ id: 'start_check', label: '开始检查（全量回归）', enabled: true, primary: true }, merge],
+      };
+    case 'blocked':
+      return {
+        ...common,
+        status: 'blocked',
+        ...CARD_STATUS_LABELS.blocked,
+        canContinue: false,
+        reasons: top3(head),
+        actions: [
+          { id: 'fix', label: '交给 Claude Code 修复', enabled: false, disabledReason: 'Claude Code 驱动在 M3 提供；你自己修改后会回到「实现中」' },
+          { id: 'merge_override', label: '授权强行合并', enabled: false, disabledReason: '授权在 M2-3 提供' },
+          ctx.runAction(false),
+          merge,
+        ],
+      };
+    case 'awaiting_visual':
+      return {
+        ...common,
+        status: 'needs_you',
+        ...CARD_STATUS_LABELS.needs_you,
+        canContinue: false,
+        reasons: top3(head),
+        actions: [{ id: 'confirm_visual', label: '确认外观', enabled: false, disabledReason: '截图确认在 M4-2 提供', primary: true }, merge],
+      };
+    default:
+      // mergeable（终止阶段不会作为进行中的改动传进来）
+      return {
+        ...common,
+        status: 'ok',
+        ...CARD_STATUS_LABELS.ok,
+        canContinue: true,
+        reasons: top3([{ severity: 5, text: `改动${name}全部检查通过，可以合并`, featureIds: [] }]),
+        actions: [{ ...merge, primary: true }, ctx.runAction(false)],
+      };
+  }
 }
 
 function collectReasons(features: FeatureView[]): CardReason[] {

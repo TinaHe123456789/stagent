@@ -104,6 +104,8 @@ export type Event =
       checkPath?: string;
       /** 检查代码的大白话摘要（§16）。 */
       summary?: string;
+      /** 起草它的改动（新功能档）。 */
+      changeId?: string;
     }
   | {
       type: 'example.locked';
@@ -111,6 +113,8 @@ export type Event =
       checkPath: string;
       checkHash: Sha256Hex;
       by: 'user';
+      /** 锁定它的改动（新功能档）。 */
+      changeId?: string;
       /** 锁定前的先失败检查（v2.2）：runId 指向 purpose:'red_check' 的运行；豁免时为 waived。 */
       redCheck?: { runId: string; status: 'failed' } | { waived: true; reason: string } | { baseline: true };
     }

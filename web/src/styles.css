@@ -568,8 +568,7 @@ select {
   font-size: 13px;
 }
 
-/* ---- 临时演示入口 ---- */
-.dev-panel {
+.dev-panel-unused {
   border-style: dashed;
 }
 .row {
@@ -591,4 +590,137 @@ select {
   display: flex;
   gap: 12px;
   align-items: center;
+}
+
+/* ---- 改动 ---- */
+.change-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.change-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.change-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+.change-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-size: 12px;
+}
+.steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  gap: 6px;
+}
+.step {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #f1f3f5;
+  color: var(--muted);
+  font-size: 13px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.step-done {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+.step-current {
+  background: var(--info-bg);
+  color: var(--info);
+  font-weight: 600;
+}
+.step-current.step-blocked {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+.step-skipped {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.phase {
+  font-size: 13px;
+}
+.phase-blocked {
+  color: var(--bad);
+}
+.phase-mergeable {
+  color: var(--ok);
+}
+.blockers {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--bad);
+  font-size: 13px;
+}
+.hint-row {
+  justify-content: space-between;
+  align-items: center;
+}
+.drafts {
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
+.draft-list {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.span-2 {
+  grid-column: 1 / -1;
+}
+.new-change {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.new-change > input {
+  flex: 1;
+  min-width: 260px;
+}
+.track-choice {
+  display: flex;
+  gap: 8px;
+}
+.track-choice label {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.track-choice label.chosen {
+  border-color: var(--accent);
+  background: #f8fafc;
+}
+.track-choice input {
+  margin-right: 4px;
+}
+.small {
+  font-size: 12px;
+  margin: 8px 0 0;
+}
+.drawer-change {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
 }

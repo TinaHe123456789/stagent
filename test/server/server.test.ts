@@ -19,7 +19,8 @@ describe('M1 闭环演示（端到端）', () => {
     await p.lock('登录', '.stagent/checks/login/b.mjs', PASS, featureId);
     o = (await p.call<O>('GET', '/api/overview')).body;
     expect(o.status).toBe('blocked');
-    expect(o.reasons[0]!.text).toContain('尚未运行');
+    expect(o.change?.phase).toBe('implementing');
+    expect(o.reasons[0]!.text).toContain('开始检查');
 
     await p.runAll();
     o = (await p.call<O>('GET', '/api/overview')).body;
@@ -55,7 +56,9 @@ describe('M1 闭环演示（端到端）', () => {
     await p.runAll();
     let o = (await p.call<O>('GET', '/api/overview')).body;
     expect(o.status).toBe('blocked');
-    expect(o.reasons[0]!.text).toBe('购物车 被破坏：1 个已锁定例子失败');
+    expect(o.change?.phase).toBe('blocked');
+    expect(o.reasons[0]!.text).toBe('「购物车」的例子失败：购物车 正常');
+    expect(o.reasons.some((r) => r.text === '购物车 被破坏：1 个已锁定例子失败')).toBe(true);
     await writeFile(join(p.root, 'src/app.js'), 'export const x = 1;\n');
     await p.runAll();
     o = (await p.call<O>('GET', '/api/overview')).body;
@@ -74,11 +77,11 @@ describe('证据失效豁免与账本自身（验收 #24、#25 端到端）', ()
     expect((await p.call<FeatureView>('GET', `/api/features/${featureId}`)).body.examples[0]!.reason).toBe('stale');
   });
 
-  it('追加事件（新增功能、锁定新例子）不让已有证据过期', async () => {
+  it('追加事件（升降档等）不让已有证据过期', async () => {
     const p = await serverProject();
-    const { featureId } = await p.lock('登录', '.stagent/checks/a.mjs', PASS);
+    const { featureId, changeId } = await p.lock('登录', '.stagent/checks/a.mjs', PASS);
     await p.runAll();
-    await p.call('POST', '/api/dev/features', { name: '注册' });
+    await p.call('POST', `/api/changes/${changeId}/track`, { track: 'small' });
     expect((await p.call<FeatureView>('GET', `/api/features/${featureId}`)).body.state).toBe('verified');
   });
 });
@@ -132,15 +135,19 @@ describe('接口行为', () => {
     expect(o.status).toBe('blocked');
   });
 
-  it('锁定例子的输入校验：路径必须在 .stagent/checks/ 下且存在', async () => {
+  it('起草例子的输入校验：路径必须在 .stagent/checks/ 下且存在；必须给出功能', async () => {
     const p = await serverProject();
-    const { featureId } = (await p.call<{ featureId: string }>('POST', '/api/dev/features', { name: '登录' })).body;
-    const body = { given: 'g', when: 'w', then: 't' };
-    expect((await p.call('POST', `/api/dev/features/${featureId}/examples`, { ...body, checkPath: 'src/app.js' })).status).toBe(400);
-    expect((await p.call('POST', `/api/dev/features/${featureId}/examples`, { ...body, checkPath: '.stagent/checks/nope.mjs' })).status).toBe(400);
-    expect((await p.call('POST', `/api/dev/features/${featureId}/examples`, { checkPath: '.stagent/checks/x.mjs' })).status).toBe(400);
-    expect((await p.call('POST', '/api/dev/features/f-missing/examples', body)).status).toBe(404);
-    expect((await p.call('POST', '/api/dev/features', { name: '  ' })).status).toBe(400);
+    const c = (await p.call<{ changeId: string }>('POST', '/api/changes', { description: '加登录', track: 'feature' })).body;
+    const url = `/api/changes/${c.changeId}/examples`;
+    const body = { featureName: '登录', given: 'g', when: 'w', then: 't' };
+    expect((await p.call('POST', url, { ...body, checkPath: 'src/app.js' })).status).toBe(400);
+    expect((await p.call('POST', url, { ...body, checkPath: '.stagent/checks/nope.mjs' })).status).toBe(400);
+    expect((await p.call('POST', url, { checkPath: '.stagent/checks/x.mjs' })).status).toBe(400);
+    await p.writeCheck('.stagent/checks/x.mjs', PASS);
+    expect((await p.call('POST', url, { given: 'g', when: 'w', then: 't', checkPath: '.stagent/checks/x.mjs' })).status).toBe(400);
+    expect((await p.call('POST', url, { ...body, featureName: undefined, featureId: 'f-missing', checkPath: '.stagent/checks/x.mjs' })).status).toBe(404);
+    expect((await p.call('POST', '/api/changes/c-missing/examples', body)).status).toBe(404);
+    expect((await p.call('POST', '/api/changes', { description: '  ' })).status).toBe(400);
     expect((await p.call('GET', '/api/features/f-missing')).status).toBe(404);
   });
 
@@ -153,7 +160,7 @@ describe('接口行为', () => {
     let o = (await p.call<O>('GET', '/api/overview')).body;
     expect(o.status).toBe('ledger_modified');
     expect((await p.call('POST', '/api/runs')).status).toBe(423);
-    expect((await p.call('POST', '/api/dev/features', { name: 'x' })).status).toBe(423);
+    expect((await p.call('POST', '/api/changes', { description: 'x' })).status).toBe(423);
     expect((await p.call('POST', '/api/ledger/accept', { reason: '好' })).status).toBe(400);
     expect((await p.call('POST', '/api/ledger/accept', { reason: '我改了功能名称' })).status).toBe(200);
     o = (await p.call<O>('GET', '/api/overview')).body;

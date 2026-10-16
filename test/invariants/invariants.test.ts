@@ -31,12 +31,12 @@ const FORGED = {
 describe('Invariant 2：不存在任何 API 能直接把功能写成已验证', () => {
   it('对每个写接口发送伪造的"已验证"请求，功能都不会变成已验证，也不会出现非执行器写入的 run', async () => {
     const p = await serverProject();
-    const { featureId, exampleId } = await p.lock('登录', '.stagent/checks/a.mjs', FAIL);
+    const { featureId, exampleId, changeId } = await p.lock('登录', '.stagent/checks/a.mjs', FAIL);
     const writeRoutes = routesOf(p.app).filter((r) => r.method !== 'GET' && r.method !== 'HEAD');
     expect(writeRoutes.length).toBeGreaterThan(0);
 
     for (const r of writeRoutes) {
-      const url = r.url.replace(':id', featureId).replace(':exampleId', exampleId);
+      const url = r.url.replace(':id', r.url.startsWith('/api/changes') ? changeId : featureId).replace(':exampleId', exampleId);
       await p.app.inject({ method: r.method as 'POST', url, payload: { ...FORGED, exampleId, featureId, checkPath: '.stagent/checks/a.mjs' } });
       await p.service.waitForRun();
     }
@@ -59,8 +59,12 @@ describe('Invariant 2：不存在任何 API 能直接把功能写成已验证', 
       .map((r) => `${r.method} ${r.url}`)
       .sort();
     expect(writes).toEqual([
-      'POST /api/dev/features',
-      'POST /api/dev/features/:id/examples',
+      'POST /api/changes',
+      'POST /api/changes/:id/check',
+      'POST /api/changes/:id/examples',
+      'POST /api/changes/:id/examples/lock',
+      'POST /api/changes/:id/track',
+      'POST /api/guard/pre-tool-use',
       'POST /api/ledger/accept',
       'POST /api/runs',
       'POST /api/runs/current/cancel',
