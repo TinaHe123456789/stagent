@@ -49,6 +49,8 @@ export interface CheckResult {
   checkSnapshotId?: Sha256Hex;
   /** 同轮复跑记录；flaky 时至少两条。 */
   attempts?: CheckAttempt[];
+  /** errored / not_run 的原因（如开发服务器未就绪、超时、依赖缺失）。 */
+  detail?: string;
 }
 
 /** 文件归属：某个文件承载哪些功能（M4-3）。 */
