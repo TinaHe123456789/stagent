@@ -1,3 +1,7 @@
 # web/
 
-前端占位目录（React + Vite）。首页结论卡、功能表等界面在 M1-3 实现，构建产物输出到 `web/dist/` 并打包进 npm 包。
+Stagent 前端（React + Vite）。`npm run build` 会把它构建到 `web/dist/`，由本地服务托管并随 npm 包发布。
+
+开发：先在一个示例项目里运行 `stagent --no-open`（默认 4310 端口），再在本目录运行 `npx vite`，`/api` 会代理到服务。
+
+接口类型直接从 `../src/projection/` 以 `import type` 引入，前后端共用一份定义。
