@@ -16,7 +16,7 @@ npm run build   # 编译到 dist/
 ## 当前进度
 
 - [x] M1-1 项目脚手架与账本内核（事件链）—— 见 [docs/ledger.md](docs/ledger.md)
-- [ ] M1-2 检查快照、workTreeHash 与检查执行器
+- [x] M1-2 检查快照、workTreeHash 与检查执行器 —— 见 [docs/executor.md](docs/executor.md)
 - [ ] M1-3 状态投影、本地服务、init 与首页结论卡
 
 ## CLI（M1-1）

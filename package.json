@@ -26,9 +26,13 @@
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/node": "^20.19.43",
+    "@types/picomatch": "^4.0.3",
     "eslint": "^9.39.5",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.71.2",
     "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "picomatch": "^4.0.7"
   }
 }

@@ -1,0 +1,5 @@
+{
+  "checkCommand": "vitest run --config vitest.checks.config.mjs {path}",
+  "checkTimeoutMs": 60000,
+  "flakyRetries": 1
+}
