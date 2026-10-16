@@ -17,11 +17,15 @@ npm run build   # 编译到 dist/
 
 - [x] M1-1 项目脚手架与账本内核（事件链）—— 见 [docs/ledger.md](docs/ledger.md)
 - [x] M1-2 检查快照、workTreeHash 与检查执行器 —— 见 [docs/executor.md](docs/executor.md)
-- [ ] M1-3 状态投影、本地服务、init 与首页结论卡
+- [x] M1-3 状态投影、本地服务、init 与首页结论卡 —— 见 [docs/service.md](docs/service.md)
 
-## CLI（M1-1）
+## CLI
 
 ```bash
-stagent ledger verify [--root <dir>]                 # 校验事件链：0 完好 / 2 锁定 / 3 版本不符
-stagent ledger accept --reason <原因> [--root <dir>]  # 账本被修改时接受当前状态
+stagent init                                          # 初始化 .stagent/、账本、config.json 草稿、.gitignore
+stagent [--port 4310] [--host 127.0.0.1] [--no-open]  # 启动本地服务
+stagent ledger verify [--root <dir>]                  # 校验事件链：0 完好 / 2 锁定 / 3 版本不符
+stagent ledger accept --reason <原因> [--root <dir>]   # 账本被修改时接受当前状态
 ```
+
+看效果：`npm run demo`（生成示例项目并在 0.0.0.0:4310 启动）。

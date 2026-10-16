@@ -2,23 +2,31 @@
 /**
  * stagent CLI 入口（npx stagent）。
  *
- * M1-1 只提供账本相关子命令；init、本地服务（M1-3）与 hook pre-tool-use（M2-1）在后续任务加入。
+ * 无参数时在当前目录启动本地服务（§3、D4）；hook pre-tool-use 在 M2-1 加入。
  */
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { initProject } from '../init/init.js';
 import { Ledger, LedgerMissingError, LedgerVersionError, type VerifyReport } from '../ledger/index.js';
+import { ServiceAlreadyRunningError } from '../server/service-lock.js';
+import { DEFAULT_PORT, startService } from '../server/start.js';
 
 export const EXIT = { ok: 0, error: 1, locked: 2, version: 3 } as const;
 
-const HELP = `用法：stagent <命令> [选项]
+const HELP = `用法：stagent [命令] [选项]
 
 命令：
+  （无）/ serve                 启动本地服务并打开浏览器（默认端口 ${DEFAULT_PORT} 起）
+  init                          在项目中初始化 .stagent/、账本、config.json 草稿与 .gitignore
   ledger verify                 校验 .stagent/ledger/events.jsonl 的事件链
   ledger accept --reason <原因>  账本被修改时"我确认，接受当前状态"（原因至少 4 个字）
 
 选项：
   --root <目录>   项目根目录（默认当前目录）
+  --port <端口>   服务起始端口（被占用时自动递增）
+  --host <地址>   服务监听地址（默认 127.0.0.1）
+  --no-open       启动服务时不打开浏览器
   -v, --version   显示版本
   -h, --help      显示帮助
 `;
@@ -32,18 +40,52 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
   const args = [...argv];
   const root = resolve(takeOption(args, '--root') ?? process.cwd());
   const reason = takeOption(args, '--reason');
+  const port = takeOption(args, '--port');
+  const host = takeOption(args, '--host');
+  const noOpen = takeFlag(args, '--no-open');
 
   if (args.includes('-v') || args.includes('--version')) {
     io.out(version());
     return EXIT.ok;
   }
   const [cmd, sub] = args;
-  if (!cmd || cmd === 'help' || args.includes('-h') || args.includes('--help')) {
+  if (cmd === 'help' || args.includes('-h') || args.includes('--help')) {
     io.out(HELP);
     return EXIT.ok;
   }
 
   try {
+    if (!cmd || cmd === 'serve') {
+      const running = await startService({
+        root,
+        port: port ? Number(port) : undefined,
+        host,
+        open: !noOpen,
+      });
+      io.out(`Stagent 已启动：${running.url}（Ctrl+C 退出）`);
+      await new Promise<void>((resolve) => {
+        const stop = () => void running.close().then(resolve);
+        process.once('SIGINT', stop);
+        process.once('SIGTERM', stop);
+      });
+      return EXIT.ok;
+    }
+    if (cmd === 'init') {
+      const r = await initProject(root);
+      io.out(
+        [
+          `✅ 已初始化 Stagent（projectId ${r.projectId}）`,
+          r.created.length ? `新建：${r.created.join('、')}` : '已存在，未覆盖任何文件',
+          r.gitignoreAdded.length ? `.gitignore 新增：${r.gitignoreAdded.join('、')}` : '',
+          `检测到：${r.detected.framework} / ${r.detected.testRunner}；检查命令：${String(r.config.checkCommand)}`,
+          ...r.warnings.map((w) => `⚠️ ${w}`),
+          '下一步：运行 stagent 启动服务',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      );
+      return EXIT.ok;
+    }
     if (cmd === 'ledger' && sub === 'verify') {
       const ledger = await Ledger.open(root);
       io.out(describe(ledger.report));
@@ -63,6 +105,10 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
     if (err instanceof LedgerVersionError) {
       io.err(err.message);
       return EXIT.version;
+    }
+    if (err instanceof ServiceAlreadyRunningError) {
+      io.err(err.message);
+      return EXIT.error;
     }
     if (err instanceof LedgerMissingError) {
       io.err(err.message);
@@ -93,6 +139,13 @@ function takeOption(args: string[], name: string): string | undefined {
   const value = args[i + 1];
   args.splice(i, 2);
   return value;
+}
+
+function takeFlag(args: string[], name: string): boolean {
+  const i = args.indexOf(name);
+  if (i === -1) return false;
+  args.splice(i, 1);
+  return true;
 }
 
 function version(): string {
